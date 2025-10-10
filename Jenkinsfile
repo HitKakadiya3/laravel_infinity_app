@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         FTP_HOST = 'ftpupload.net'
-        FTP_USER = 'if0_40134274'
+        FTP_USER = 'if0_39730581'
         FTP_PASS = credentials('infinityfree_ftp_pass')  // stored in Jenkins credentials
         FTP_PATH = '/htdocs'   // InfinityFree web root
     }
