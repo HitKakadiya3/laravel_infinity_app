@@ -21,6 +21,136 @@ pipeline {
                 sh 'php artisan config:cache'
                 sh 'php artisan route:cache'
                 sh 'php artisan view:cache'
+                
+                // Create production .env file
+                sh '''
+                    echo "Creating production environment file..."
+                    cat > .env.production << 'EOF'
+APP_NAME="Laravel Infinity App"
+APP_ENV=production
+APP_KEY=base64:your_app_key_here
+APP_DEBUG=false
+APP_URL=https://laravel-modular-kit.fwh.is
+
+LOG_CHANNEL=stack
+LOG_DEPRECATIONS_CHANNEL=null
+LOG_LEVEL=error
+
+DB_CONNECTION=sqlite
+DB_DATABASE=/tmp/database.sqlite
+
+BROADCAST_DRIVER=log
+CACHE_DRIVER=file
+FILESYSTEM_DISK=local
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+
+MEMCACHED_HOST=127.0.0.1
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+MAIL_MAILER=smtp
+MAIL_HOST=mailpit
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS="hello@example.com"
+MAIL_FROM_NAME="${APP_NAME}"
+
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=
+AWS_USE_PATH_STYLE_ENDPOINT=false
+
+PUSHER_APP_ID=
+PUSHER_APP_KEY=
+PUSHER_APP_SECRET=
+PUSHER_HOST=
+PUSHER_PORT=443
+PUSHER_SCHEME=https
+PUSHER_APP_CLUSTER=mt1
+
+VITE_APP_NAME="${APP_NAME}"
+VITE_PUSHER_APP_KEY="${PUSHER_APP_KEY}"
+VITE_PUSHER_HOST="${PUSHER_HOST}"
+VITE_PUSHER_PORT="${PUSHER_PORT}"
+VITE_PUSHER_SCHEME="${PUSHER_SCHEME}"
+VITE_PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER}"
+EOF
+                '''
+                
+                // Create .htaccess for shared hosting
+                sh '''
+                    echo "Creating .htaccess for shared hosting..."
+                    cat > .htaccess << 'EOF'
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+    
+    # Redirect everything to public folder
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ /public/$1 [L]
+</IfModule>
+
+# Disable directory browsing
+Options -Indexes
+
+# Error pages
+ErrorDocument 404 /public/index.php
+ErrorDocument 500 /public/index.php
+EOF
+                '''
+                
+                // Create public/.htaccess
+                sh '''
+                    echo "Creating public/.htaccess..."
+                    cat > public/.htaccess << 'EOF'
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Redirect Trailing Slashes If Not A Folder...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    # Send Requests To Front Controller...
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Disable server signature
+ServerSignature Off
+
+# Hide PHP version
+<IfModule mod_headers.c>
+    Header unset X-Powered-By
+</IfModule>
+EOF
+                '''
             }
         }
 
@@ -44,6 +174,23 @@ pipeline {
                                    -not -name "composer.lock" -not -name "package-lock.json" \
                                    -not -name ".gitignore" -not -name "README.md" -not -name "Jenkinsfile" \
                                    -exec cp --parents {} deploy_clean/ \\;
+                            
+                            # Copy the production .env file as .env
+                            cp .env.production deploy_clean/.env
+                            
+                            # Create necessary directories in deploy_clean
+                            mkdir -p deploy_clean/storage/app/public
+                            mkdir -p deploy_clean/storage/framework/cache/data
+                            mkdir -p deploy_clean/storage/framework/sessions
+                            mkdir -p deploy_clean/storage/framework/views
+                            mkdir -p deploy_clean/storage/logs
+                            mkdir -p deploy_clean/bootstrap/cache
+                            
+                            # Create empty index.html files to prevent directory browsing
+                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/index.html
+                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/app/index.html
+                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/framework/index.html
+                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/bootstrap/index.html
                             
                             echo "Files prepared for deployment:"
                             find deploy_clean -type f | head -10
