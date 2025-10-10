@@ -40,7 +40,7 @@ pipeline {
                             # Copy all files except excluded ones
                             echo "Copying files for deployment..."
                             find . -type f -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./tests/*" \
-                                   -not -path "./storage/logs/*" -not -name "*.log" -not -name ".env*" \
+                                   -not -path "./vendor/*" -not -path "./storage/logs/*" -not -name "*.log" -not -name ".env*" \
                                    -not -name "composer.lock" -not -name "package-lock.json" \
                                    -not -name ".gitignore" -not -name "README.md" -not -name "Jenkinsfile" \
                                    -exec cp --parents {} deploy_clean/ \\;
