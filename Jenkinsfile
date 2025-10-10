@@ -52,13 +52,34 @@ pipeline {
                     } catch (Exception e) {
                         echo "FTP plugin not available, using alternative method..."
                         
-                        // Fallback: Create a ZIP file and provide instructions
+                        // Fallback: Create a deployment package and provide instructions
                         if (isUnix()) {
                             sh '''
-                                # Create deployment package
-                                zip -r laravel_app_deploy.zip . -x "*.git*" "node_modules/*" "tests/*" "storage/logs/*" "*.log" "composer.lock" "package-lock.json"
-                                echo "Deployment package created: laravel_app_deploy.zip"
-                                echo "Please manually upload this file to your FTP server"
+                                # Create deployment package using tar (more universally available)
+                                echo "Creating deployment package..."
+                                
+                                # Create a temporary directory for clean files
+                                mkdir -p deploy_package
+                                
+                                # Copy files excluding unwanted ones
+                                find . -type f -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./tests/*" \
+                                       -not -path "./storage/logs/*" -not -name "*.log" -not -name "composer.lock" \
+                                       -not -name "package-lock.json" -not -name ".gitignore" \
+                                       -exec cp --parents {} deploy_package/ \\;
+                                
+                                # Create tar.gz archive
+                                tar -czf laravel_app_deploy.tar.gz -C deploy_package .
+                                
+                                # Clean up temporary directory
+                                rm -rf deploy_package
+                                
+                                echo "Deployment package created: laravel_app_deploy.tar.gz"
+                                echo "Extract this file and upload the contents to your FTP server"
+                                
+                                # Show package contents
+                                echo "Package contains:"
+                                tar -tzf laravel_app_deploy.tar.gz | head -20
+                                echo "... and more files"
                             '''
                         } else {
                             powershell '''
@@ -83,7 +104,11 @@ pipeline {
                         }
                         
                         // Archive the deployment package for download
-                        archiveArtifacts artifacts: 'laravel_app_deploy.zip', fingerprint: true
+                        if (isUnix()) {
+                            archiveArtifacts artifacts: 'laravel_app_deploy.tar.gz', fingerprint: true
+                        } else {
+                            archiveArtifacts artifacts: 'laravel_app_deploy.zip', fingerprint: true
+                        }
                     }
                 }
             }
