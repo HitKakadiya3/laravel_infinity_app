@@ -28,28 +28,24 @@ pipeline {
             steps {
                 script {
                     // Upload everything to InfinityFree using FTP
-                    ftpPublisher alwaysPublishFromMaster: true,
-                        continueOnError: false,
-                        failOnError: true,
-                        publishers: [
-                            [configName: 'InfinityFree',
-                             transfers: [[
-                                asciiMode: false,
-                                cleanRemote: false,
-                                excludes: '',
-                                flatten: false,
-                                makeEmptyDirs: false,
-                                noDefaultExcludes: false,
-                                patternSeparator: '[, ]+',
-                                remoteDirectory: "${FTP_PATH}",
-                                remoteDirectorySDF: false,
-                                removePrefix: '',
-                                sourceFiles: '**/*'
-                             ]],
-                             usePromotionTimestamp: false,
-                             verbose: true
-                            ]
-                        ]
+                    publishOverFTP([
+                        configName: 'InfinityFree',
+                        transfers: [[
+                            asciiMode: false,
+                            cleanRemote: false,
+                            excludes: '.git/**, .gitignore, composer.lock, package-lock.json, node_modules/**, tests/**, storage/logs/**',
+                            flatten: false,
+                            makeEmptyDirs: false,
+                            noDefaultExcludes: false,
+                            patternSeparator: '[, ]+',
+                            remoteDirectory: "${FTP_PATH}",
+                            remoteDirectorySDF: false,
+                            removePrefix: '',
+                            sourceFiles: '**/*'
+                        ]],
+                        usePromotionTimestamp: false,
+                        verbose: true
+                    ])
                 }
             }
         }
