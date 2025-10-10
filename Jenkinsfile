@@ -155,24 +155,31 @@ EOF
                                    -not -path "./vendor/*" -not -path "./storage/logs/*" -not -name "*.log" -not -name ".env*" \
                                    -not -name "composer.lock" -not -name "package-lock.json" \
                                    -not -name ".gitignore" -not -name "README.md" -not -name "Jenkinsfile" \
-                                   -exec cp --parents {} deploy_clean/ \\;
+                                   -not -empty -exec cp --parents {} deploy_clean/ \\;
                             
                             # Copy the production .env file as .env
                             cp .env.production deploy_clean/.env
                             
                             # Copy public/index.php to root for shared hosting
                             echo "Setting up shared hosting structure..."
-                            cp deploy_clean/public/index.php deploy_clean/index.php
+                            if [ -f deploy_clean/public/index.php ]; then
+                                cp deploy_clean/public/index.php deploy_clean/index.php
+                                
+                                # Modify the root index.php to point to correct paths
+                                sed -i 's|__DIR__."/../vendor/autoload.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
+                                sed -i 's|__DIR__."/../bootstrap/app.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
+                            fi
                             
-                            # Modify the root index.php to point to correct paths
-                            sed -i 's|__DIR__."/../vendor/autoload.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
-                            sed -i 's|__DIR__."/../bootstrap/app.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
-                            
-                            # Also copy all public assets to root
-                            cp -r deploy_clean/public/* deploy_clean/ 2>/dev/null || true
-                            
-                            # Remove the duplicate index.php that was just copied
-                            rm -f deploy_clean/public/index.php
+                            # Copy public assets to root (only non-empty files)
+                            echo "Copying public assets..."
+                            find deploy_clean/public -type f -not -empty -exec sh -c '
+                                for file do
+                                    filename=$(basename "$file")
+                                    if [ "$filename" != "index.php" ] && [ -s "$file" ]; then
+                                        cp "$file" deploy_clean/
+                                    fi
+                                done
+                            ' sh {} +
                             
                             # Create necessary directories in deploy_clean
                             mkdir -p deploy_clean/storage/app/public
@@ -181,12 +188,6 @@ EOF
                             mkdir -p deploy_clean/storage/framework/views
                             mkdir -p deploy_clean/storage/logs
                             mkdir -p deploy_clean/bootstrap/cache
-                            
-                            # Create empty index.html files to prevent directory browsing
-                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/index.html
-                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/app/index.html
-                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/storage/framework/index.html
-                            echo '<html><head><title>403 Forbidden</title></head><body><h1>Directory access is forbidden.</h1></body></html>' > deploy_clean/bootstrap/index.html
                             
                             echo "Files prepared for deployment:"
                             find deploy_clean -type f | head -10
@@ -200,28 +201,36 @@ EOF
                                 local remote_path="$2"
                                 local remote_dir=$(dirname "$remote_path")
                                 
+                                # Check if file exists and is not empty
+                                if [ ! -f "$file" ] || [ ! -s "$file" ]; then
+                                    echo "⚠ Skipping empty or non-existent file: $remote_path"
+                                    return 0
+                                fi
+                                
                                 # Create directory if it doesn't exist
                                 curl -s --ftp-create-dirs -T /dev/null "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_dir}/" || true
                                 
                                 # Upload the file
                                 if curl -T "$file" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_path}"; then
-                                    echo "✓ Uploaded: $remote_path"
+                                    echo "✓ Uploaded: $remote_path ($(stat -c%s "$file") bytes)"
                                 else
                                     echo "✗ Failed: $remote_path"
                                     return 1
                                 fi
                             }
                             
-                            # Upload all files
+                            # Upload all files (only non-empty ones)
                             cd deploy_clean
                             failed_uploads=0
-                            total_files=$(find . -type f | wc -l)
+                            total_files=$(find . -type f -not -empty | wc -l)
                             current_file=0
                             
-                            find . -type f | while read file; do
+                            echo "Uploading $total_files non-empty files..."
+                            
+                            find . -type f -not -empty | while read file; do
                                 current_file=$((current_file + 1))
                                 remote_path="${file#./}"
-                                echo "[$current_file/$total_files] Uploading: $remote_path"
+                                echo "[$current_file/$total_files] Processing: $remote_path"
                                 
                                 if ! upload_file "$file" "/$remote_path"; then
                                     failed_uploads=$((failed_uploads + 1))
