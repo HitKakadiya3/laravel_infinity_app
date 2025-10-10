@@ -27,89 +27,88 @@ pipeline {
         stage('Deploy to InfinityFree') {
             steps {
                 script {
-                    // Try using step wrapper for FTP publish
-                    try {
-                        step([
-                            $class: 'jenkins.plugins.publish_over_ftp.BapFtpPublisher',
-                            configName: 'InfinityFree',
-                            transfers: [[
-                                $class: 'jenkins.plugins.publish_over_ftp.BapFtpTransfer',
-                                asciiMode: false,
-                                cleanRemote: false,
-                                excludes: '.git/**, .gitignore, composer.lock, package-lock.json, node_modules/**, tests/**, storage/logs/**',
-                                flatten: false,
-                                makeEmptyDirs: false,
-                                noDefaultExcludes: false,
-                                patternSeparator: '[, ]+',
-                                remoteDirectory: "${FTP_PATH}",
-                                remoteDirectorySDF: false,
-                                removePrefix: '',
-                                sourceFiles: '**/*'
-                            ]],
-                            usePromotionTimestamp: false,
-                            verbose: true
-                        ])
-                    } catch (Exception e) {
-                        echo "FTP plugin not available, using alternative method..."
-                        
-                        // Fallback: Create a deployment package and provide instructions
-                        if (isUnix()) {
-                            sh '''
-                                # Create deployment package using tar (more universally available)
-                                echo "Creating deployment package..."
-                                
-                                # Create a temporary directory for clean files
-                                mkdir -p deploy_package
-                                
-                                # Copy files excluding unwanted ones
-                                find . -type f -not -path "./.git/*" -not -path "./node_modules/*" -not -path "./tests/*" \
-                                       -not -path "./storage/logs/*" -not -name "*.log" -not -name "composer.lock" \
-                                       -not -name "package-lock.json" -not -name ".gitignore" \
-                                       -exec cp --parents {} deploy_package/ \\;
-                                
-                                # Create tar.gz archive
-                                tar -czf laravel_app_deploy.tar.gz -C deploy_package .
-                                
-                                # Clean up temporary directory
-                                rm -rf deploy_package
-                                
-                                echo "Deployment package created: laravel_app_deploy.tar.gz"
-                                echo "Extract this file and upload the contents to your FTP server"
-                                
-                                # Show package contents
-                                echo "Package contains:"
-                                tar -tzf laravel_app_deploy.tar.gz | head -20
-                                echo "... and more files"
-                            '''
-                        } else {
-                            powershell '''
-                                # Create deployment package using PowerShell
-                                $excludePatterns = @("*.git*", "node_modules", "tests", "storage\\logs", "*.log", "composer.lock", "package-lock.json")
-                                $filesToZip = Get-ChildItem -Recurse -File | Where-Object {
-                                    $file = $_
-                                    $shouldExclude = $false
-                                    foreach ($pattern in $excludePatterns) {
-                                        if ($file.FullName -like "*$pattern*") {
-                                            $shouldExclude = $true
-                                            break
-                                        }
-                                    }
-                                    -not $shouldExclude
+                    echo "Starting deployment to InfinityFree..."
+                    
+                    // Use lftp for direct FTP upload
+                    withCredentials([string(credentialsId: 'infinityfree_ftp_pass', variable: 'FTP_PASSWORD')]) {
+                        sh '''
+                            # Install lftp if not available
+                            if ! command -v lftp &> /dev/null; then
+                                echo "Installing lftp..."
+                                apt-get update && apt-get install -y lftp || yum install -y lftp || {
+                                    echo "Could not install lftp automatically"
+                                    exit 1
                                 }
-                                
-                                Compress-Archive -Path $filesToZip.FullName -DestinationPath "laravel_app_deploy.zip" -Force
-                                Write-Host "Deployment package created: laravel_app_deploy.zip"
-                                Write-Host "Please manually upload this file to your FTP server"
-                            '''
-                        }
-                        
-                        // Archive the deployment package for download
-                        if (isUnix()) {
-                            archiveArtifacts artifacts: 'laravel_app_deploy.tar.gz', fingerprint: true
-                        } else {
-                            archiveArtifacts artifacts: 'laravel_app_deploy.zip', fingerprint: true
-                        }
+                            fi
+                            
+                            echo "Creating clean deployment directory..."
+                            # Create a clean deployment directory
+                            rm -rf deploy_clean
+                            mkdir -p deploy_clean
+                            
+                            # Copy all files except excluded ones
+                            rsync -av --exclude='.git' --exclude='node_modules' --exclude='tests' \
+                                     --exclude='storage/logs/*' --exclude='*.log' --exclude='.env*' \
+                                     --exclude='composer.lock' --exclude='package-lock.json' \
+                                     --exclude='.gitignore' --exclude='README.md' \
+                                     ./ deploy_clean/
+                            
+                            echo "Files prepared for deployment:"
+                            find deploy_clean -type f | head -10
+                            echo "... and more files"
+                            
+                            echo "Connecting to FTP server and uploading..."
+                            # Upload using lftp with better error handling
+                            lftp -c "
+                                set ftp:ssl-allow no
+                                set ftp:passive-mode yes
+                                set net:timeout 30
+                                set net:max-retries 3
+                                open -u ${FTP_USER},${FTP_PASSWORD} ${FTP_HOST}
+                                cd ${FTP_PATH}
+                                lcd deploy_clean
+                                mirror --reverse --delete --verbose --parallel=3 ./ ./
+                                quit
+                            " || {
+                                echo "FTP upload failed, creating fallback package..."
+                                cd deploy_clean
+                                tar -czf ../laravel_app_deploy.tar.gz .
+                                cd ..
+                                echo "Fallback package created: laravel_app_deploy.tar.gz"
+                                exit 1
+                            }
+                            
+                            echo "Deployment completed successfully!"
+                            # Clean up
+                            rm -rf deploy_clean
+                        '''
                     }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    echo "Verifying deployment..."
+                    
+                    // Check if the main files are accessible via FTP
+                    withCredentials([string(credentialsId: 'infinityfree_ftp_pass', variable: 'FTP_PASSWORD')]) {
+                        sh '''
+                            echo "Checking deployed files..."
+                            lftp -c "
+                                set ftp:ssl-allow no
+                                set ftp:passive-mode yes
+                                open -u ${FTP_USER},${FTP_PASSWORD} ${FTP_HOST}
+                                cd ${FTP_PATH}
+                                ls -la
+                                ls -la public/
+                                quit
+                            " || echo "Could not verify deployment via FTP"
+                        '''
+                    }
+                    
+                    echo "Deployment verification completed!"
                 }
             }
         }
