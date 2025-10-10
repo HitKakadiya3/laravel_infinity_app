@@ -84,35 +84,10 @@ VITE_PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER}"
 EOF
                 '''
                 
-                // Create .htaccess for shared hosting
+                // Create .htaccess for shared hosting (root level)
                 sh '''
                     echo "Creating .htaccess for shared hosting..."
                     cat > .htaccess << 'EOF'
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    
-    # Handle Authorization Header
-    RewriteCond %{HTTP:Authorization} .
-    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-    
-    # Redirect everything to public folder
-    RewriteCond %{REQUEST_URI} !^/public/
-    RewriteRule ^(.*)$ /public/$1 [L]
-</IfModule>
-
-# Disable directory browsing
-Options -Indexes
-
-# Error pages
-ErrorDocument 404 /public/index.php
-ErrorDocument 500 /public/index.php
-EOF
-                '''
-                
-                // Create public/.htaccess
-                sh '''
-                    echo "Creating public/.htaccess..."
-                    cat > public/.htaccess << 'EOF'
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
@@ -142,6 +117,9 @@ EOF
     Header always set X-XSS-Protection "1; mode=block"
 </IfModule>
 
+# Disable directory browsing
+Options -Indexes
+
 # Disable server signature
 ServerSignature Off
 
@@ -149,6 +127,10 @@ ServerSignature Off
 <IfModule mod_headers.c>
     Header unset X-Powered-By
 </IfModule>
+
+# Error pages
+ErrorDocument 404 /index.php
+ErrorDocument 500 /index.php
 EOF
                 '''
             }
@@ -177,6 +159,20 @@ EOF
                             
                             # Copy the production .env file as .env
                             cp .env.production deploy_clean/.env
+                            
+                            # Copy public/index.php to root for shared hosting
+                            echo "Setting up shared hosting structure..."
+                            cp deploy_clean/public/index.php deploy_clean/index.php
+                            
+                            # Modify the root index.php to point to correct paths
+                            sed -i 's|__DIR__."/\.\./vendor/autoload\.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
+                            sed -i 's|__DIR__."/\.\./bootstrap/app\.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
+                            
+                            # Also copy all public assets to root
+                            cp -r deploy_clean/public/* deploy_clean/ 2>/dev/null || true
+                            
+                            # Remove the duplicate index.php that was just copied
+                            rm -f deploy_clean/public/index.php
                             
                             # Create necessary directories in deploy_clean
                             mkdir -p deploy_clean/storage/app/public
