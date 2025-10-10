@@ -165,8 +165,8 @@ EOF
                             cp deploy_clean/public/index.php deploy_clean/index.php
                             
                             # Modify the root index.php to point to correct paths
-                            sed -i 's|__DIR__."/\.\./vendor/autoload\.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
-                            sed -i 's|__DIR__."/\.\./bootstrap/app\.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
+                            sed -i 's|__DIR__."/../vendor/autoload.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
+                            sed -i 's|__DIR__."/../bootstrap/app.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
                             
                             # Also copy all public assets to root
                             cp -r deploy_clean/public/* deploy_clean/ 2>/dev/null || true
