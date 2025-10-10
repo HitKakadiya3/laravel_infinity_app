@@ -268,8 +268,8 @@ PHPEOF
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-use Illuminate\Contracts\Http\Kernel;
-use Illuminate\Http\Request;
+use Illuminate\\Contracts\\Http\\Kernel;
+use Illuminate\\Http\\Request;
 
 define('LARAVEL_START', microtime(true));
 
@@ -345,6 +345,46 @@ try {
 }
 PHPEOF
                             fi
+                            
+                            # Function to upload a single file
+                            upload_file() {
+                                local file="$1"
+                                local remote_path="$2"
+                                local remote_dir=$(dirname "$remote_path")
+                                
+                                # Check if file exists and is not empty
+                                if [ ! -f "$file" ] || [ ! -s "$file" ]; then
+                                    echo "⚠ Skipping empty or non-existent file: $remote_path"
+                                    return 0
+                                fi
+                                
+                                # Create directory if it doesn't exist
+                                curl -s --ftp-create-dirs -T /dev/null "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_dir}/" || true
+                                
+                                # Upload the file with retry
+                                local max_retries=3
+                                local retry=0
+                                
+                                while [ $retry -lt $max_retries ]; do
+                                    if curl -T "$file" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_path}"; then
+                                        echo "✓ Uploaded: $remote_path ($(stat -c%s "$file") bytes)"
+                                        
+                                        # Set proper permissions for PHP files
+                                        if [[ "$remote_path" == *.php ]] || [[ "$remote_path" == */artisan ]]; then
+                                            curl -Q "SITE CHMOD 755 ${FTP_PATH}${remote_path}" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                                        fi
+                                        
+                                        return 0
+                                    else
+                                        retry=$((retry + 1))
+                                        echo "⚠ Retry $retry/$max_retries for: $remote_path"
+                                        sleep 2
+                                    fi
+                                done
+                                
+                                echo "✗ Failed after $max_retries attempts: $remote_path"
+                                return 1
+                            }
                             
                             echo "Files prepared for deployment:"
                             echo "Total files: $(find deploy_clean -type f | wc -l)"
