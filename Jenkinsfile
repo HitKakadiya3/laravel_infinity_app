@@ -37,7 +37,7 @@ LOG_DEPRECATIONS_CHANNEL=null
 LOG_LEVEL=error
 
 DB_CONNECTION=sqlite
-DB_DATABASE=/tmp/database.sqlite
+DB_DATABASE=database/database.sqlite
 
 BROADCAST_DRIVER=log
 CACHE_DRIVER=file
@@ -160,34 +160,95 @@ EOF
                             # Copy the production .env file as .env
                             cp .env.production deploy_clean/.env
                             
-                            # Copy public/index.php to root for shared hosting
-                            echo "Setting up shared hosting structure..."
-                            if [ -f deploy_clean/public/index.php ]; then
-                                cp deploy_clean/public/index.php deploy_clean/index.php
-                                
-                                # Modify the root index.php to point to correct paths
-                                sed -i 's|__DIR__."/../vendor/autoload.php"|__DIR__."/vendor/autoload.php"|g' deploy_clean/index.php
-                                sed -i 's|__DIR__."/../bootstrap/app.php"|__DIR__."/bootstrap/app.php"|g' deploy_clean/index.php
-                            fi
-                            
-                            # Copy public assets to root (only non-empty files)
-                            echo "Copying public assets..."
-                            find deploy_clean/public -type f -not -empty -exec sh -c '
-                                for file do
-                                    filename=$(basename "$file")
-                                    if [ "$filename" != "index.php" ] && [ -s "$file" ]; then
-                                        cp "$file" deploy_clean/
-                                    fi
-                                done
-                            ' sh {} +
-                            
-                            # Create necessary directories in deploy_clean
+                            # Create necessary directories
                             mkdir -p deploy_clean/storage/app/public
                             mkdir -p deploy_clean/storage/framework/cache/data
                             mkdir -p deploy_clean/storage/framework/sessions
                             mkdir -p deploy_clean/storage/framework/views
                             mkdir -p deploy_clean/storage/logs
                             mkdir -p deploy_clean/bootstrap/cache
+                            mkdir -p deploy_clean/database
+                            
+                            # Create SQLite database file
+                            touch deploy_clean/database/database.sqlite
+                            
+                            # Copy public/index.php to root and modify for shared hosting
+                            echo "Setting up shared hosting structure..."
+                            if [ -f deploy_clean/public/index.php ]; then
+                                cp deploy_clean/public/index.php deploy_clean/index.php
+                                
+                                # Create a properly modified index.php for shared hosting
+                                cat > deploy_clean/index.php << 'PHPEOF'
+<?php
+
+use Illuminate\\Contracts\\Http\\Kernel;
+use Illuminate\\Http\\Request;
+
+define('LARAVEL_START', microtime(true));
+
+/*
+|--------------------------------------------------------------------------
+| Check If The Application Is Under Maintenance
+|--------------------------------------------------------------------------
+|
+| If the application is in maintenance / demo mode via the "down" command
+| we will load this file so that any pre-rendered content can be shown
+| instead of starting the framework, which could cause an exception.
+|
+*/
+
+if (file_exists($maintenance = __DIR__.'/storage/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Register The Auto Loader
+|--------------------------------------------------------------------------
+|
+| Composer provides a convenient, automatically generated class loader for
+| this application. We just need to utilize it! We'll simply require it
+| into the script here so we don't need to manually load our classes.
+|
+*/
+
+require __DIR__.'/vendor/autoload.php';
+
+/*
+|--------------------------------------------------------------------------
+| Run The Application
+|--------------------------------------------------------------------------
+|
+| Once we have the application, we can handle the incoming request using
+| the application's HTTP kernel. Then, we will send the response back
+| to this client's browser, allowing them to enjoy our application.
+|
+*/
+
+$app = require_once __DIR__.'/bootstrap/app.php';
+
+$kernel = $app->make(Kernel::class);
+
+$response = $kernel->handle(
+    $request = Request::capture()
+)->send();
+
+$kernel->terminate($request, $response);
+PHPEOF
+                            fi
+                            
+                            # Copy other public assets to root (excluding index.php)
+                            echo "Copying public assets..."
+                            if [ -d deploy_clean/public ]; then
+                                find deploy_clean/public -type f -not -name "index.php" -not -empty -exec sh -c '
+                                    for file do
+                                        filename=$(basename "$file")
+                                        if [ -s "$file" ]; then
+                                            cp "$file" deploy_clean/
+                                        fi
+                                    done
+                                ' sh {} +
+                            fi
                             
                             echo "Files prepared for deployment:"
                             find deploy_clean -type f | head -10
@@ -210,13 +271,29 @@ EOF
                                 # Create directory if it doesn't exist
                                 curl -s --ftp-create-dirs -T /dev/null "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_dir}/" || true
                                 
-                                # Upload the file
-                                if curl -T "$file" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_path}"; then
-                                    echo "✓ Uploaded: $remote_path ($(stat -c%s "$file") bytes)"
-                                else
-                                    echo "✗ Failed: $remote_path"
-                                    return 1
-                                fi
+                                # Upload the file with retry
+                                local max_retries=3
+                                local retry=0
+                                
+                                while [ $retry -lt $max_retries ]; do
+                                    if curl -T "$file" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}${remote_path}"; then
+                                        echo "✓ Uploaded: $remote_path ($(stat -c%s "$file") bytes)"
+                                        
+                                        # Set proper permissions for PHP files
+                                        if [[ "$remote_path" == *.php ]] || [[ "$remote_path" == */artisan ]]; then
+                                            curl -Q "SITE CHMOD 755 ${FTP_PATH}${remote_path}" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                                        fi
+                                        
+                                        return 0
+                                    else
+                                        retry=$((retry + 1))
+                                        echo "⚠ Retry $retry/$max_retries for: $remote_path"
+                                        sleep 2
+                                    fi
+                                done
+                                
+                                echo "✗ Failed after $max_retries attempts: $remote_path"
+                                return 1
                             }
                             
                             # Upload all files (only non-empty ones)
@@ -227,13 +304,40 @@ EOF
                             
                             echo "Uploading $total_files non-empty files..."
                             
+                            # Upload files with priority order
+                            priority_files=".env index.php artisan"
+                            
+                            echo "Uploading priority files first..."
+                            for pfile in $priority_files; do
+                                if [ -f "$pfile" ] && [ -s "$pfile" ]; then
+                                    current_file=$((current_file + 1))
+                                    echo "[$current_file/$total_files] Priority: $pfile"
+                                    if ! upload_file "$pfile" "/$pfile"; then
+                                        failed_uploads=$((failed_uploads + 1))
+                                    fi
+                                fi
+                            done
+                            
+                            echo "Uploading remaining files..."
                             find . -type f -not -empty | while read file; do
-                                current_file=$((current_file + 1))
                                 remote_path="${file#./}"
-                                echo "[$current_file/$total_files] Processing: $remote_path"
                                 
-                                if ! upload_file "$file" "/$remote_path"; then
-                                    failed_uploads=$((failed_uploads + 1))
+                                # Skip if already uploaded as priority
+                                skip=false
+                                for pfile in $priority_files; do
+                                    if [ "$remote_path" = "$pfile" ]; then
+                                        skip=true
+                                        break
+                                    fi
+                                done
+                                
+                                if [ "$skip" = false ]; then
+                                    current_file=$((current_file + 1))
+                                    echo "[$current_file/$total_files] Processing: $remote_path"
+                                    
+                                    if ! upload_file "$file" "/$remote_path"; then
+                                        failed_uploads=$((failed_uploads + 1))
+                                    fi
                                 fi
                             done
                             
@@ -245,6 +349,20 @@ EOF
                                 echo "⚠ $failed_uploads files failed to upload"
                                 exit 1
                             fi
+                            
+                            # Set directory permissions
+                            echo "Setting directory permissions..."
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/bootstrap" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/bootstrap/cache" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage/framework" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage/framework/cache" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage/framework/sessions" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage/framework/views" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/storage/logs" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 755 ${FTP_PATH}/database" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
+                            curl -Q "SITE CHMOD 644 ${FTP_PATH}/database/database.sqlite" "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}/" || true
                             
                             # Clean up
                             rm -rf deploy_clean
@@ -264,11 +382,18 @@ EOF
                         sh '''
                             echo "Checking if key files were deployed..."
                             
-                            # Check if index.php exists in public directory
-                            if curl -s --head "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/public/index.php" > /dev/null 2>&1; then
-                                echo "✓ public/index.php found on server"
+                            # Check if index.php exists in root
+                            if curl -s --head "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/index.php" > /dev/null 2>&1; then
+                                echo "✓ index.php found in root"
                             else
-                                echo "✗ public/index.php not found on server"
+                                echo "✗ index.php not found in root"
+                            fi
+                            
+                            # Check if .env file exists
+                            if curl -s --head "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/.env" > /dev/null 2>&1; then
+                                echo "✓ .env file found on server"
+                            else
+                                echo "✗ .env file not found on server"
                             fi
                             
                             # Check if artisan file exists
@@ -278,11 +403,33 @@ EOF
                                 echo "✗ artisan file not found on server"
                             fi
                             
+                            # Check if vendor directory exists
+                            if curl -s --head "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/vendor/" > /dev/null 2>&1; then
+                                echo "✓ vendor directory found on server"
+                            else
+                                echo "✗ vendor directory not found on server"
+                            fi
+                            
                             # List some files to verify structure
                             echo "Listing root directory on server:"
-                            curl -s "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/" || echo "Could not list directory"
+                            curl -s "ftp://${FTP_USER}:${FTP_PASSWORD}@${FTP_HOST}${FTP_PATH}/" | head -20 || echo "Could not list directory"
                         '''
                     }
+                    
+                    // Try to check the website response
+                    sh '''
+                        echo "Checking website response..."
+                        response=$(curl -s -o /dev/null -w "%{http_code}" https://laravel-modular-kit.fwh.is/ || echo "000")
+                        echo "Website response code: $response"
+                        
+                        if [ "$response" = "200" ]; then
+                            echo "✓ Website is responding successfully!"
+                        elif [ "$response" = "500" ]; then
+                            echo "⚠ Website still returning 500 error - check server logs"
+                        else
+                            echo "⚠ Unexpected response code: $response"
+                        fi
+                    '''
                     
                     echo "Deployment verification completed!"
                 }
