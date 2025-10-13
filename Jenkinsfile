@@ -466,4 +466,50 @@ PHPEOF
                                     if [ "$remote_path" = "$pfile" ]; then
                                         skip=true
                                         break
-   
+                                    fi
+                                done
+                                
+                                if [ "$skip" = false ]; then
+                                    current_file=$((current_file + 1))
+                                    echo "[$current_file/$total_files] Regular: $remote_path"
+                                    if ! upload_file "$file" "/$remote_path"; then
+                                        failed_uploads=$((failed_uploads + 1))
+                                    fi
+                                fi
+                            done
+                            
+                            echo "=== Deployment Summary ==="
+                            echo "Total files processed: $total_files"
+                            echo "Failed uploads: $failed_uploads"
+                            
+
+                            if [ $failed_uploads -gt 0 ]; then
+                                echo "⚠ Warning: $failed_uploads files failed to upload"
+                                echo "Deployment completed with warnings"
+                            else
+                                echo "✓ All files uploaded successfully!"
+                            fi
+                            
+                            echo "Deployment to InfinityFree completed!"
+                            echo "Site should be available at: https://laravel-modular-kit.fwh.is"
+                            echo "Debug info available at: https://laravel-modular-kit.fwh.is/debug.php"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
+        success {
+            echo 'Deployment completed successfully!'
+        }
+        failure {
+            echo 'Deployment failed. Check the logs for details.'
+        }
+    }
+}
