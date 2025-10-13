@@ -207,6 +207,90 @@ EOF
                             touch deploy_clean/database/database.sqlite
                             chmod 666 deploy_clean/database/database.sqlite
                             
+                            # Create a debug index.php for troubleshooting
+                            echo "Creating debug index.php..."
+                            cat > deploy_clean/debug.php << 'PHPEOF'
+<?php
+echo "<h1>Laravel Debug Information</h1>";
+echo "<h2>PHP Version: " . phpversion() . "</h2>";
+echo "<h2>Current Directory: " . __DIR__ . "</h2>";
+echo "<h2>Files in current directory:</h2>";
+echo "<pre>";
+print_r(scandir(__DIR__));
+echo "</pre>";
+
+echo "<h2>Vendor directory exists:</h2>";
+echo var_export(is_dir(__DIR__ . '/vendor'), true) . "<br>";
+if (is_dir(__DIR__ . '/vendor')) {
+    echo "Vendor files count: " . count(glob(__DIR__ . '/vendor/*')) . "<br>";
+}
+
+echo "<h2>Bootstrap app file exists:</h2>";
+echo var_export(file_exists(__DIR__ . '/bootstrap/app.php'), true) . "<br>";
+
+echo "<h2>Autoload file exists:</h2>";
+echo var_export(file_exists(__DIR__ . '/vendor/autoload.php'), true) . "<br>";
+
+echo "<h2>.env file exists:</h2>";
+echo var_export(file_exists(__DIR__ . '/.env'), true) . "<br>";
+
+echo "<h2>Storage directories writable:</h2>";
+echo "storage: " . (is_writable(__DIR__ . '/storage') ? 'Yes' : 'No') . "<br>";
+echo "bootstrap/cache: " . (is_writable(__DIR__ . '/bootstrap/cache') ? 'Yes' : 'No') . "<br>";
+
+if (file_exists(__DIR__ . '/.env')) {
+    echo "<h2>.env contents (first 10 lines):</h2>";
+    echo "<pre>";
+    $lines = file(__DIR__ . '/.env');
+    echo htmlspecialchars(implode('', array_slice($lines, 0, 10)));
+    echo "</pre>";
+}
+
+echo "<h2>PHP Error Log:</h2>";
+if (function_exists('error_get_last')) {
+    $error = error_get_last();
+    if ($error) {
+        echo "<pre>";
+        print_r($error);
+        echo "</pre>";
+    } else {
+        echo "No recent errors.<br>";
+    }
+}
+
+// Try to include autoload
+echo "<h2>Testing autoload:</h2>";
+try {
+    if (file_exists(__DIR__ . '/vendor/autoload.php')) {
+        require_once __DIR__ . '/vendor/autoload.php';
+        echo "✓ Autoload successful<br>";
+        
+        // Try to load Laravel app
+        if (file_exists(__DIR__ . '/bootstrap/app.php')) {
+            echo "✓ Attempting to load Laravel app...<br>";
+            $app = require_once __DIR__ . '/bootstrap/app.php';
+            echo "✓ Laravel app loaded successfully<br>";
+            echo "App class: " . get_class($app) . "<br>";
+        } else {
+            echo "✗ bootstrap/app.php not found<br>";
+        }
+    } else {
+        echo "✗ vendor/autoload.php not found<br>";
+    }
+} catch (Exception $e) {
+    echo "✗ Error: " . htmlspecialchars($e->getMessage()) . "<br>";
+    echo "File: " . htmlspecialchars($e->getFile()) . "<br>";
+    echo "Line: " . $e->getLine() . "<br>";
+    echo "Trace: <pre>" . htmlspecialchars($e->getTraceAsString()) . "</pre>";
+} catch (Error $e) {
+    echo "✗ Fatal Error: " . htmlspecialchars($e->getMessage()) . "<br>";
+    echo "File: " . htmlspecialchars($e->getFile()) . "<br>";
+    echo "Line: " . $e->getLine() . "<br>";
+    echo "Trace: <pre>" . htmlspecialchars($e->getTraceAsString()) . "</pre>";
+}
+?>
+PHPEOF
+                            
                             # Clear any cached configuration that might have Jenkins paths
                             echo "Clearing cached configurations..."
                             rm -f deploy_clean/bootstrap/cache/config.php
