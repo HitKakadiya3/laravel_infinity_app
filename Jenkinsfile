@@ -393,29 +393,6 @@ return [
 ];
 PHPEOF
                             
-                            # Override session configuration
-                            cat > deploy_clean/config/session.php << 'PHPEOF'
-<?php
-
-return [
-    'driver' => env('SESSION_DRIVER', 'array'),
-    'lifetime' => env('SESSION_LIFETIME', 120),
-    'expire_on_close' => false,
-    'encrypt' => false,
-    'files' => storage_path('framework/sessions'),
-    'connection' => env('SESSION_CONNECTION'),
-    'table' => 'sessions',
-    'store' => env('SESSION_STORE'),
-    'lottery' => [2, 100],
-    'cookie' => env('SESSION_COOKIE', 'laravel_session'),
-    'path' => '/',
-    'domain' => env('SESSION_DOMAIN'),
-    'secure' => env('SESSION_SECURE_COOKIE'),
-    'http_only' => true,
-    'same_site' => 'lax',
-];
-PHPEOF
-                            
                             # Copy public/index.php to root and modify for shared hosting
                             echo "Setting up shared hosting structure..."
                             if [ -f deploy_clean/public/index.php ]; then
