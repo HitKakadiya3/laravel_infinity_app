@@ -39,22 +39,25 @@ pipeline {
 APP_NAME="Laravel Infinity App"
 APP_ENV=production
 APP_KEY=$APP_KEY_GENERATED
-APP_DEBUG=true
+APP_DEBUG=false
 APP_URL=https://laravel-modular-kit.fwh.is
 
-LOG_CHANNEL=stack
+LOG_CHANNEL=single
 LOG_DEPRECATIONS_CHANNEL=null
-LOG_LEVEL=debug
+LOG_LEVEL=error
+LOG_SINGLE_TARGET=/tmp/laravel.log
 
 DB_CONNECTION=sqlite
-DB_DATABASE=database/database.sqlite
+DB_DATABASE=/tmp/database.sqlite
 
 BROADCAST_DRIVER=log
 CACHE_DRIVER=file
+CACHE_PATH=/tmp/cache
 FILESYSTEM_DISK=local
 QUEUE_CONNECTION=sync
 SESSION_DRIVER=file
 SESSION_LIFETIME=120
+SESSION_PATH=/tmp
 
 MEMCACHED_HOST=127.0.0.1
 
@@ -62,7 +65,7 @@ REDIS_HOST=127.0.0.1
 REDIS_PASSWORD=null
 REDIS_PORT=6379
 
-MAIL_MAILER=smtp
+MAIL_MAILER=log
 MAIL_HOST=mailpit
 MAIL_PORT=1025
 MAIL_USERNAME=null
@@ -91,6 +94,10 @@ VITE_PUSHER_HOST="${PUSHER_HOST}"
 VITE_PUSHER_PORT="${PUSHER_PORT}"
 VITE_PUSHER_SCHEME="${PUSHER_SCHEME}"
 VITE_PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER}"
+
+VIEW_COMPILED_PATH=/tmp/views
+CACHE_COMPILED_PATH=/tmp/cache
+SESSION_COMPILED_PATH=/tmp/sessions
 EOF
                 '''
                 
@@ -175,7 +182,7 @@ EOF
                             # Copy the production .env file as .env
                             cp .env.production deploy_clean/.env
                             
-                            # Create necessary directories
+                            # Create necessary directories in /tmp (allowed path)
                             mkdir -p deploy_clean/storage/app/public
                             mkdir -p deploy_clean/storage/framework/cache/data
                             mkdir -p deploy_clean/storage/framework/sessions
@@ -184,83 +191,134 @@ EOF
                             mkdir -p deploy_clean/bootstrap/cache
                             mkdir -p deploy_clean/database
                             
-                            # Create SQLite database file with proper permissions
+                            # Create SQLite database file in /tmp (allowed path)
                             touch deploy_clean/database/database.sqlite
                             chmod 666 deploy_clean/database/database.sqlite
                             
-                            # Create a debug index.php for troubleshooting
-                            echo "Creating debug index.php..."
-                            cat > deploy_clean/debug.php << 'PHPEOF'
+                            # Create a custom logging configuration to handle open_basedir restrictions
+                            cat > deploy_clean/config/logging.php << 'PHPEOF'
 <?php
-echo "<h1>Laravel Debug Information</h1>";
-echo "<h2>PHP Version: " . phpversion() . "</h2>";
-echo "<h2>Current Directory: " . __DIR__ . "</h2>";
-echo "<h2>Files in current directory:</h2>";
-echo "<pre>";
-print_r(scandir(__DIR__));
-echo "</pre>";
 
-echo "<h2>Vendor directory exists:</h2>";
-echo var_export(is_dir(__DIR__ . '/vendor'), true) . "<br>";
-if (is_dir(__DIR__ . '/vendor')) {
-    echo "Vendor files count: " . count(glob(__DIR__ . '/vendor/*')) . "<br>";
-}
+use Monolog\Handler\NullHandler;
+use Monolog\Handler\StreamHandler;
+use Monolog\Handler\SyslogUdpHandler;
 
-echo "<h2>Bootstrap app file exists:</h2>";
-echo var_export(file_exists(__DIR__ . '/bootstrap/app.php'), true) . "<br>";
+return [
 
-echo "<h2>Autoload file exists:</h2>";
-echo var_export(file_exists(__DIR__ . '/vendor/autoload.php'), true) . "<br>";
+    /*
+    |--------------------------------------------------------------------------
+    | Default Log Channel
+    |--------------------------------------------------------------------------
+    |
+    | This option defines the default log channel that gets used when writing
+    | messages to the logs. The name specified in this option should match
+    | one of the channels defined in the "channels" configuration array.
+    |
+    */
 
-echo "<h2>.env file exists:</h2>";
-echo var_export(file_exists(__DIR__ . '/.env'), true) . "<br>";
+    'default' => env('LOG_CHANNEL', 'single'),
 
-echo "<h2>Storage directories writable:</h2>";
-echo "storage: " . (is_writable(__DIR__ . '/storage') ? 'Yes' : 'No') . "<br>";
-echo "bootstrap/cache: " . (is_writable(__DIR__ . '/bootstrap/cache') ? 'Yes' : 'No') . "<br>";
+    /*
+    |--------------------------------------------------------------------------
+    | Deprecations Log Channel
+    |--------------------------------------------------------------------------
+    |
+    | This option controls the log channel that should be used to log warnings
+    | regarding deprecated PHP and library features. This allows you to get
+    | your application ready for upcoming major versions of dependencies.
+    |
+    */
 
-if (file_exists(__DIR__ . '/.env')) {
-    echo "<h2>.env contents (first 10 lines):</h2>";
-    echo "<pre>";
-    $lines = file(__DIR__ . '/.env');
-    echo htmlspecialchars(implode('', array_slice($lines, 0, 10)));
-    echo "</pre>";
-}
+    'deprecations' => [
+        'channel' => env('LOG_DEPRECATIONS_CHANNEL', 'null'),
+        'trace' => false,
+    ],
 
-echo "<h2>Error Log:</h2>";
-if (function_exists('error_get_last')) {
-    $error = error_get_last();
-    if ($error) {
-        echo "<pre>";
-        print_r($error);
-        echo "</pre>";
-    } else {
-        echo "No recent errors.<br>";
-    }
-}
+    /*
+    |--------------------------------------------------------------------------
+    | Log Channels
+    |--------------------------------------------------------------------------
+    |
+    | Here you may configure the log channels for your application. Out of
+    | the box, Laravel uses the Monolog PHP logging library. This gives
+    | you a variety of powerful log handlers / formatters to utilize.
+    |
+    | Available Drivers: "single", "daily", "slack", "syslog",
+    |                    "errorlog", "monolog",
+    |                    "custom", "stack"
+    |
+    */
 
-// Try to include autoload
-echo "<h2>Testing autoload:</h2>";
-try {
-    if (file_exists(__DIR__ . '/vendor/autoload.php')) {
-        require_once __DIR__ . '/vendor/autoload.php';
-        echo "✓ Autoload successful<br>";
-        
-        // Try to load Laravel app
-        if (file_exists(__DIR__ . '/bootstrap/app.php')) {
-            $app = require_once __DIR__ . '/bootstrap/app.php';
-            echo "✓ Laravel app loaded successfully<br>";
-        } else {
-            echo "✗ bootstrap/app.php not found<br>";
-        }
-    } else {
-        echo "✗ vendor/autoload.php not found<br>";
-    }
-} catch (Exception $e) {
-    echo "✗ Error: " . $e->getMessage() . "<br>";
-    echo "Trace: " . $e->getTraceAsString() . "<br>";
-}
-?>
+    'channels' => [
+        'stack' => [
+            'driver' => 'stack',
+            'channels' => ['single'],
+            'ignore_exceptions' => false,
+        ],
+
+        'single' => [
+            'driver' => 'single',
+            'path' => env('LOG_SINGLE_TARGET', '/tmp/laravel.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
+
+        'daily' => [
+            'driver' => 'daily',
+            'path' => '/tmp/laravel.log',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => 14,
+        ],
+
+        'slack' => [
+            'driver' => 'slack',
+            'url' => env('LOG_SLACK_WEBHOOK_URL'),
+            'username' => 'Laravel Log',
+            'emoji' => ':boom:',
+            'level' => env('LOG_LEVEL', 'critical'),
+        ],
+
+        'papertrail' => [
+            'driver' => 'monolog',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'handler' => env('LOG_PAPERTRAIL_HANDLER', SyslogUdpHandler::class),
+            'handler_with' => [
+                'host' => env('PAPERTRAIL_URL'),
+                'port' => env('PAPERTRAIL_PORT'),
+                'connectionString' => 'tls://'.env('PAPERTRAIL_URL').':'.env('PAPERTRAIL_PORT'),
+            ],
+        ],
+
+        'stderr' => [
+            'driver' => 'monolog',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'handler' => StreamHandler::class,
+            'formatter' => env('LOG_STDERR_FORMATTER'),
+            'with' => [
+                'stream' => 'php://stderr',
+            ],
+        ],
+
+        'syslog' => [
+            'driver' => 'syslog',
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
+
+        'errorlog' => [
+            'driver' => 'errorlog',
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
+
+        'null' => [
+            'driver' => 'monolog',
+            'handler' => NullHandler::class,
+        ],
+
+        'emergency' => [
+            'path' => '/tmp/laravel.log',
+        ],
+    ],
+
+];
 PHPEOF
                             
                             # Copy public/index.php to root and modify for shared hosting
