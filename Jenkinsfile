@@ -165,19 +165,12 @@ EOF
                                   --exclude='storage/logs/*' --exclude='*.log' --exclude='.env*' \
                                   --exclude='composer.lock' --exclude='package-lock.json' \
                                   --exclude='.gitignore' --exclude='README.md' --exclude='Jenkinsfile' \
-                                  --exclude='app_key.txt' \
+                                  --exclude='app_key.txt' --exclude='vendor' \
                                   ./ deploy_clean/
                             
-                            # Verify vendor directory was copied
-                            echo "Checking vendor directory:"
-                            if [ -d "deploy_clean/vendor" ]; then
-                                echo "✓ Vendor directory copied successfully"
-                                echo "Vendor files count: $(find deploy_clean/vendor -type f | wc -l)"
-                                echo "Autoload exists: $(test -f deploy_clean/vendor/autoload.php && echo 'Yes' || echo 'No')"
-                            else
-                                echo "✗ Vendor directory missing - copying manually"
-                                cp -r vendor deploy_clean/ 2>/dev/null || true
-                            fi
+                            # Note: Vendor directory excluded - will be uploaded manually
+                            echo "Vendor directory excluded from automated deployment"
+                            echo "Note: Upload vendor directory manually to the server"
                             
                             # Copy the production .env file as .env
                             cp .env.production deploy_clean/.env
@@ -428,7 +421,7 @@ PHPEOF
                             echo "Uploading $total_files non-empty files..."
                             
                             # Upload critical files first
-                            priority_files=".env index.php debug.php artisan vendor/autoload.php"
+                            priority_files=".env index.php debug.php artisan"
                             
                             echo "Uploading priority files first..."
                             for pfile in $priority_files; do
@@ -441,22 +434,7 @@ PHPEOF
                                 fi
                             done
                             
-                            # Upload vendor directory files in smaller batches
-                            echo "Uploading vendor directory..."
-                            if [ -d vendor ]; then
-                                find vendor -type f -not -empty | while read vendorfile; do
-                                    # Skip if already uploaded as priority
-                                    if [ "$vendorfile" != "vendor/autoload.php" ]; then
-                                        current_file=$((current_file + 1))
-                                        echo "[$current_file/$total_files] Vendor: $vendorfile"
-                                        if ! upload_file "$vendorfile" "/$vendorfile"; then
-                                            failed_uploads=$((failed_uploads + 1))
-                                        fi
-                                    fi
-                                done
-                            fi
-                            
-                            echo "Uploading remaining files..."
+                            echo "Uploading remaining files (excluding vendor)..."
                             find . -type f -not -empty -not -path "./vendor/*" | while read file; do
                                 remote_path="${file#./}"
                                 
@@ -481,6 +459,7 @@ PHPEOF
                             echo "=== Deployment Summary ==="
                             echo "Total files processed: $total_files"
                             echo "Failed uploads: $failed_uploads"
+                            echo "⚠ Remember to manually upload the vendor directory!"
                             
 
                             if [ $failed_uploads -gt 0 ]; then
