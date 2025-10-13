@@ -199,9 +199,9 @@ EOF
                             cat > deploy_clean/config/logging.php << 'PHPEOF'
 <?php
 
-use Monolog\Handler\NullHandler;
-use Monolog\Handler\StreamHandler;
-use Monolog\Handler\SyslogUdpHandler;
+use Monolog\\Handler\\NullHandler;
+use Monolog\\Handler\\StreamHandler;
+use Monolog\\Handler\\SyslogUdpHandler;
 
 return [
 
@@ -318,7 +318,7 @@ return [
         ],
     ],
 
-];
+};
 PHPEOF
                             
                             # Copy public/index.php to root and modify for shared hosting
