@@ -31,7 +31,14 @@ pipeline {
                 sh 'php artisan config:clear'
                 sh 'php artisan route:clear'
                 sh 'php artisan view:clear'
-                sh 'php artisan cache:clear'
+                // Remove cache:clear as it tries to access database
+                // sh 'php artisan cache:clear'
+                
+                // Create temporary SQLite database to avoid errors
+                sh '''
+                    mkdir -p database
+                    touch database/database.sqlite
+                '''
                 
                 // Don't cache config to avoid embedding Jenkins paths
                 // sh 'php artisan config:cache'
