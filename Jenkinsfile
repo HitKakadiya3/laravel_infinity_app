@@ -288,6 +288,70 @@ PHPEOF
                             echo "Overriding storage path for shared hosting..."
                             sed -i "/new Illuminate\\\\Foundation\\\\Application(/a \\
     \$app->useStoragePath(__DIR__ . '/storage');" deploy_clean/bootstrap/app.php
+                            # Also override other paths that might cause issues
+                            sed -i "/useStoragePath/a \\
+    \$app->useDatabasePath(__DIR__ . '/database');" deploy_clean/bootstrap/app.php
+                            
+                            # Create custom filesystems config to ensure local paths
+                            cat > deploy_clean/config/filesystems.php << 'PHPEOF'
+<?php
+
+return [
+    'default' => env('FILESYSTEM_DISK', 'local'),
+    'disks' => [
+        'local' => [
+            'driver' => 'local',
+            'root' => storage_path('app'),
+            'throw' => false,
+        ],
+        'public' => [
+            'driver' => 'local',
+            'root' => storage_path('app/public'),
+            'url' => env('APP_URL').'/storage',
+            'visibility' => 'public',
+            'throw' => false,
+        ],
+    ],
+    'links' => [
+        public_path('storage') => storage_path('app/public'),
+    ],
+];
+PHPEOF
+                            
+                            # Override view configuration to use local storage
+                            cat > deploy_clean/config/view.php << 'PHPEOF'
+<?php
+
+return [
+    'paths' => [
+        resource_path('views'),
+    ],
+    'compiled' => env('VIEW_COMPILED_PATH', storage_path('framework/views')),
+];
+PHPEOF
+                            
+                            # Override session configuration
+                            cat > deploy_clean/config/session.php << 'PHPEOF'
+<?php
+
+return [
+    'driver' => env('SESSION_DRIVER', 'file'),
+    'lifetime' => env('SESSION_LIFETIME', 120),
+    'expire_on_close' => false,
+    'encrypt' => false,
+    'files' => storage_path('framework/sessions'),
+    'connection' => env('SESSION_CONNECTION'),
+    'table' => 'sessions',
+    'store' => env('SESSION_STORE'),
+    'lottery' => [2, 100],
+    'cookie' => env('SESSION_COOKIE', 'laravel_session'),
+    'path' => '/',
+    'domain' => env('SESSION_DOMAIN'),
+    'secure' => env('SESSION_SECURE_COOKIE'),
+    'http_only' => true,
+    'same_site' => 'lax',
+];
+PHPEOF
                             
                             # Copy public/index.php to root and modify for shared hosting
                             echo "Setting up shared hosting structure..."
