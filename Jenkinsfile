@@ -27,6 +27,12 @@ pipeline {
                     echo "Generated key: $APP_KEY_GENERATED"
                 '''
                 
+                // Remove config caching to avoid path issues
+                sh 'php artisan config:clear'
+                sh 'php artisan route:clear'
+                sh 'php artisan view:clear'
+                sh 'php artisan cache:clear'
+                
                 sh 'php artisan config:cache'
                 sh 'php artisan route:cache'
                 sh 'php artisan view:cache'
