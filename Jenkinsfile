@@ -33,9 +33,10 @@ pipeline {
                 sh 'php artisan view:clear'
                 sh 'php artisan cache:clear'
                 
-                sh 'php artisan config:cache'
-                sh 'php artisan route:cache'
-                sh 'php artisan view:cache'
+                // Don't cache config to avoid embedding Jenkins paths
+                // sh 'php artisan config:cache'
+                // sh 'php artisan route:cache'
+                // sh 'php artisan view:cache'
                 
                 // Create production .env file with generated key
                 sh '''
@@ -54,7 +55,7 @@ LOG_LEVEL=error
 LOG_SINGLE_TARGET=/tmp/laravel.log
 
 DB_CONNECTION=sqlite
-DB_DATABASE=/tmp/database.sqlite
+DB_DATABASE=database/database.sqlite
 
 BROADCAST_DRIVER=log
 CACHE_DRIVER=file
