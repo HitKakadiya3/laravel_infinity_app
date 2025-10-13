@@ -284,6 +284,11 @@ return [
 };
 PHPEOF
                             
+                            # Fix storage path for InfinityFree (avoid open_basedir restriction)
+                            echo "Overriding storage path for shared hosting..."
+                            sed -i "/new Illuminate\\\\Foundation\\\\Application(/a \\
+    \$app->useStoragePath(__DIR__ . '/storage');" deploy_clean/bootstrap/app.php
+                            
                             # Copy public/index.php to root and modify for shared hosting
                             echo "Setting up shared hosting structure..."
                             if [ -f deploy_clean/public/index.php ]; then
