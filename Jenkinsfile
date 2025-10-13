@@ -49,20 +49,18 @@ APP_KEY=$APP_KEY_GENERATED
 APP_DEBUG=false
 APP_URL=https://laravel-modular-kit.fwh.is
 
-LOG_CHANNEL=single
+LOG_CHANNEL=null
 LOG_DEPRECATIONS_CHANNEL=null
 LOG_LEVEL=error
-LOG_SINGLE_TARGET=/tmp/laravel.log
 
 DB_CONNECTION=sqlite
 DB_DATABASE=database/database.sqlite
 
 BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-CACHE_PATH=/tmp/cache
+CACHE_DRIVER=array
 FILESYSTEM_DISK=local
 QUEUE_CONNECTION=sync
-SESSION_DRIVER=file
+SESSION_DRIVER=array
 SESSION_LIFETIME=120
 SESSION_PATH=/tmp
 
@@ -270,61 +268,49 @@ return [
 ];
 PHPEOF
                             
-                            # Create a custom cache config to use /tmp
+                            # Create a custom cache config that avoids database
                             cat > deploy_clean/config/cache.php << 'PHPEOF'
 <?php
 
 return [
-    'default' => env('CACHE_DRIVER', 'file'),
+    'default' => env('CACHE_DRIVER', 'array'),
     'stores' => [
         'array' => [
             'driver' => 'array',
             'serialize' => false,
         ],
-        'database' => [
-            'driver' => 'database',
-            'table' => 'cache',
-            'connection' => null,
-            'prefix' => '',
-        ],
         'file' => [
             'driver' => 'file',
-            'path' => env('CACHE_PATH', storage_path('framework/cache/data')),
+            'path' => storage_path('framework/cache/data'),
         ],
-        'memcached' => [
-            'driver' => 'memcached',
-            'persistent_id' => env('MEMCACHED_PERSISTENT_ID'),
-            'sasl' => [
-                env('MEMCACHED_USERNAME'),
-                env('MEMCACHED_PASSWORD'),
-            ],
-            'options' => [],
-            'servers' => [
-                [
-                    'host' => env('MEMCACHED_HOST', '127.0.0.1'),
-                    'port' => env('MEMCACHED_PORT', 11211),
-                    'weight' => 100,
-                ],
-            ],
-        ],
-        'redis' => [
-            'driver' => 'redis',
-            'connection' => 'cache',
-            'lock_connection' => 'default',
-        ],
-        'dynamodb' => [
-            'driver' => 'dynamodb',
-            'key' => env('AWS_ACCESS_KEY_ID'),
-            'secret' => env('AWS_SECRET_ACCESS_KEY'),
-            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
-            'table' => env('DYNAMODB_CACHE_TABLE', 'cache'),
-            'endpoint' => env('DYNAMODB_ENDPOINT'),
-        ],
-        'octane' => [
-            'driver' => 'octane',
+        'null' => [
+            'driver' => 'null',
         ],
     ],
     'prefix' => env('CACHE_PREFIX', 'laravel_cache'),
+];
+PHPEOF
+                            
+                            # Create session config that uses array driver
+                            cat > deploy_clean/config/session.php << 'PHPEOF'
+<?php
+
+return [
+    'driver' => env('SESSION_DRIVER', 'array'),
+    'lifetime' => env('SESSION_LIFETIME', 120),
+    'expire_on_close' => false,
+    'encrypt' => false,
+    'files' => storage_path('framework/sessions'),
+    'connection' => env('SESSION_CONNECTION'),
+    'table' => 'sessions',
+    'store' => env('SESSION_STORE'),
+    'lottery' => [2, 100],
+    'cookie' => env('SESSION_COOKIE', 'laravel_session'),
+    'path' => '/',
+    'domain' => env('SESSION_DOMAIN'),
+    'secure' => env('SESSION_SECURE_COOKIE'),
+    'http_only' => true,
+    'same_site' => 'lax',
 ];
 PHPEOF
                             
@@ -334,86 +320,30 @@ PHPEOF
                             cat > deploy_clean/config/logging.php << 'PHPEOF'
 <?php
 
-use Monolog\\Handler\\NullHandler;
-use Monolog\\Handler\\StreamHandler;
-use Monolog\\Handler\\SyslogUdpHandler;
-
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | Default Log Channel
-    |--------------------------------------------------------------------------
-    |
-    | This option defines the default log channel that gets used when writing
-    | messages to the logs. The name specified in this option should match
-    | one of the channels defined in the "channels" configuration array.
-    |
-    */
-
-    'default' => env('LOG_CHANNEL', 'single'),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Deprecations Log Channel
-    |--------------------------------------------------------------------------
-    |
-    | This option controls the log channel that should be used to log warnings
-    | regarding deprecated PHP and library features. This allows you to get
-    | your application ready for upcoming major versions of dependencies.
-    |
-    */
-
+    'default' => env('LOG_CHANNEL', 'null'),
     'deprecations' => [
         'channel' => env('LOG_DEPRECATIONS_CHANNEL', 'null'),
         'trace' => false,
     ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Log Channels
-    |--------------------------------------------------------------------------
-    |
-    | Here you may configure the log channels for your application. Out of
-    | the box, Laravel uses the Monolog PHP logging library. This gives
-    | you a variety of powerful log handlers / formatters to utilize.
-    |
-    | Available Drivers: "single", "daily", "slack", "syslog",
-    |                    "errorlog", "monolog",
-    |                    "custom", "stack"
-    |
-    */
-
     'channels' => [
-        'stack' => [
-            'driver' => 'stack',
-            'channels' => ['single'],
-            'ignore_exceptions' => false,
-        ],
-
-        'single' => [
-            'driver' => 'single',
-            'path' => env('LOG_SINGLE_TARGET', '/tmp/laravel.log'),
-            'level' => env('LOG_LEVEL', 'debug'),
-        ],
-
-        'daily' => [
-            'driver' => 'daily',
-            'path' => '/tmp/laravel.log',
-            'level' => env('LOG_LEVEL', 'debug'),
-            'days' => 14,
-        ],
-
         'null' => [
             'driver' => 'monolog',
-            'handler' => NullHandler::class,
+            'handler' => Monolog\\Handler\\NullHandler::class,
         ],
-
+        'single' => [
+            'driver' => 'single',
+            'path' => '/tmp/laravel.log',
+            'level' => env('LOG_LEVEL', 'error'),
+        ],
+        'errorlog' => [
+            'driver' => 'errorlog',
+            'level' => env('LOG_LEVEL', 'error'),
+        ],
         'emergency' => [
             'path' => '/tmp/laravel.log',
         ],
     ],
-
 };
 PHPEOF
                             
@@ -468,7 +398,7 @@ PHPEOF
 <?php
 
 return [
-    'driver' => env('SESSION_DRIVER', 'file'),
+    'driver' => env('SESSION_DRIVER', 'array'),
     'lifetime' => env('SESSION_LIFETIME', 120),
     'expire_on_close' => false,
     'encrypt' => false,
